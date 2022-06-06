@@ -2,17 +2,14 @@
 name = "prime"
 version = "0.1.0"
 authors = ["Martino Fontana <tinozzo123@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-integer-sqrt = "*"
-rayon = "*"
+integer-sqrt = "0.1.5"
+rayon = "1.5.3"
 
 [dev-dependencies]
-crossbeam-channel = "*"
-ctrlc = "*"
-
-[profile.release]
-lto = "fat"
+crossbeam-channel = "0.5.4"
+ctrlc = "3.2.2"
