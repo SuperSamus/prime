@@ -1,17 +1,17 @@
-use integer_sqrt::IntegerSquareRoot;
-use prime::{calculator::*, generator::*};
-use rayon::prelude::*;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use prime::generator::*;
+use std::fs::OpenOptions;
+use std::io::{prelude::*, BufWriter};
+use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-
 fn main() -> std::io::Result<()> {
-    let chunk_size: usize = 1_000_000;
-    // Numbers to do singlethreaded before going multithread. *2 is to be sure it's high enough.
-    let n_before_multithreading = chunk_size.integer_sqrt() * 2;
-    let path: &str = "primes.txt";
+    let path_arg = std::env::args().nth(1);
+    let path: &str = if let Some(p) = path_arg.as_ref() {
+        p
+    } else {
+        "primes.dat"
+    };
 
     // Setting graceful closing.
     println!("Setting things up...");
@@ -26,60 +26,65 @@ fn main() -> std::io::Result<()> {
 
     // Read the file and store its contents in a Vec.
     println!("Creating or opening the file {}...", path);
-    let file = OpenOptions::new().create(true).write(true).read(true).open(path)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
 
-    // Importing current primes from the file. If The file didn't exist or is too short, clear everything and calculate until n_before_multithreading.
+    // Importing current primes from the file. If the file didn't exist or is too short, clear everything and calculate until n_before_multithreading.
     println!("Reading file...");
-    let read_buffer = BufReader::new(file);
-    let n_lines = read_buffer.lines().count();
+    let mut primes: Vec<u8> = Vec::new();
+    file.read_to_end(&mut primes)?;
 
-    let mut primes: Vec<u64> = match n_lines < gauss_function(n_before_multithreading as u64) as usize {
-        true => {
-            println!("Generating the first primes...");
-            let file = File::create(path)?;
-            let mut write_buffer = BufWriter::new(file);
-            let primes = prime_generator(n_before_multithreading as u64, Vec::new());
-            for n in primes.iter() {
-                writeln!(write_buffer, "{}", n)?;
-            }
-            write_buffer.flush()?;
-            primes
-        }
-        false => {
-            println!("Importing primes...");
-            let mut primes = Vec::with_capacity(n_lines);
-            let file = File::open(path)?;
-            let read_buffer = BufReader::new(file);
-            for line in read_buffer.lines() {
-                primes.push(line?.parse().expect("Error: the file has a line without a number!"));
-            }
-            primes
-        }
+    let mut primes = unsafe {
+        Vec::from_raw_parts(
+            primes.as_mut_ptr() as *mut u32,
+            primes.len() / std::mem::size_of::<u32>(),
+            primes.capacity() / std::mem::size_of::<u32>(),
+        )
     };
 
+    let chunk_size: u32 = 1_000_000;
+
+    // The last number is not a prime, but where the program arrived to last time
+    let start_from = if let Some(s) = primes.pop() {
+        file.seek(std::io::SeekFrom::End(
+            -i64::try_from(size_of::<u32>()).unwrap(),
+        ))?;
+        s
+    } else {
+        0
+    };
+
+    let mut append_buffer = BufWriter::new(file);
 
     // Calculating new primes!
     println!("Time to start calculating! Stop by pressing Ctrl + C.");
-    let file = OpenOptions::new().append(true).open(path)?;
-    let mut append_buffer = BufWriter::new(file);
 
-    let mut current_number = *primes.last().unwrap();
-    while running.load(Ordering::SeqCst) {
-        let last_number = current_number.saturating_add(chunk_size as u64);
-        println!("Calculating primes from {} to {}...", current_number, last_number - 1);
-        let new_primes = (current_number..last_number)
-            .into_par_iter()
-            .filter(|n| n % 2 != 0 && is_prime(*n, primes.as_slice()))
-            .collect::<Vec<u64>>();
+    let mut arrived_to = 0;
 
-        primes.extend(new_primes.into_iter().map(|n| {
-            writeln!(append_buffer, "{}", n).unwrap();
-            n
-        }));
+    par_prime_generator_map_chunks(
+        u32::MAX,
+        primes,
+        start_from,
+        chunk_size,
+        |n| append_buffer.write_all(n.to_ne_bytes().as_slice()).unwrap(),
+        |a, b| {
+            // append_buffer.flush();
+            if !running.load(Ordering::SeqCst) {
+                return false;
+            }
+            println!("Calculating primes from {} to {}...", a, b);
+            arrived_to = b;
+            true
+        },
+    );
 
-        append_buffer.flush()?;
-        current_number += chunk_size as u64;
-    }
+    // Write where it arrived, to restart from there next time.
+    append_buffer
+        .write_all(arrived_to.to_ne_bytes().as_slice())
+        .unwrap();
 
     println!("Done!");
     Ok(())

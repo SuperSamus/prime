@@ -19,7 +19,7 @@ fn main() {
     let (tx, rx) = unbounded();
 
     thread::spawn(move || {
-        prime_generator_map(max, Vec::new(), |n| {
+        prime_generator_map(max, Vec::new(), 0, |n| {
             tx.send(n).unwrap();
         });
     });

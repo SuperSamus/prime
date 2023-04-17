@@ -10,7 +10,7 @@ fn main() {
         .expect("Error reading input!");
     let max: u64 = max.trim().parse().expect("Error parsing input!");
 
-    prime_generator(max, Vec::new()).iter().for_each(|n| {
+    prime_generator(max, Vec::new(), 0).iter().for_each(|n| {
         println!("{}", n);
     });
 }
