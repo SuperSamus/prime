@@ -34,18 +34,16 @@ fn main() -> std::io::Result<()> {
 
     // Importing current primes from the file. If the file didn't exist or is too short, clear everything and calculate until n_before_multithreading.
     println!("Reading file...");
-    let mut primes: Vec<u8> = Vec::new();
-    file.read_to_end(&mut primes)?;
-
-    let mut primes = unsafe {
-        Vec::from_raw_parts(
-            primes.as_mut_ptr() as *mut u32,
-            primes.len() / std::mem::size_of::<u32>(),
-            primes.capacity() / std::mem::size_of::<u32>(),
-        )
+    #[allow(clippy::uninit_vec)]
+    let mut primes: Vec<u32> = unsafe {
+        let len = file.metadata()?.len() as usize / std::mem::size_of::<u32>();
+        let mut vec = Vec::with_capacity(len * 2);
+        vec.set_len(len);
+        file.read_exact(vec.align_to_mut::<u8>().1).unwrap();
+        vec
     };
 
-    let chunk_size: u32 = 1_000_000;
+    let chunk_size: u32 = 10_000_000;
 
     // The last number is not a prime, but where the program arrived to last time
     let start_from = if let Some(s) = primes.pop() {
@@ -69,15 +67,19 @@ fn main() -> std::io::Result<()> {
         primes,
         start_from,
         chunk_size,
-        |n| append_buffer.write_all(n.to_ne_bytes().as_slice()).unwrap(),
         |a, b| {
-            // append_buffer.flush();
+            //append_buffer.flush();
             if !running.load(Ordering::SeqCst) {
                 return false;
             }
             println!("Calculating primes from {} to {}...", a, b);
             arrived_to = b;
             true
+        },
+        |arr| {
+            append_buffer
+                .write_all(unsafe { arr.align_to::<u8>() }.1)
+                .unwrap()
         },
     );
 

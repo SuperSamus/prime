@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::cmp;
 
 /// Calculates roughly the number of primes that are less than n.
-/// 
+///
 /// The approximated result is always greater than the actual one
 pub fn gauss_function<N: Integer + FromPrimitive + ToPrimitive>(n: N) -> N {
     // https://mathworld.wolfram.com/PrimeNumberTheorem.html
@@ -30,7 +30,7 @@ fn get_basic_primes<N: Roots + Copy, F: FnMut(N)>(
 }
 
 /// Check if every number from the start to the end specified is prime and returns the primes found in a Vec.
-/// 
+///
 /// The latest prime in the list list is used as a starting point if it is higher than the start supplied.
 ///
 /// The Vec sent must be ordered. If you send an empty Vec, 2 and 3 will be added automatically.
@@ -58,7 +58,7 @@ pub fn prime_generator<N: Roots + FromPrimitive + ToPrimitive + Copy + CheckedAd
 }
 
 /// Check if every number from the start to the end specified is prime and returns the primes found in a Vec.
-/// 
+///
 /// The latest prime in the list list is used as a starting point if it is higher than the start supplied.
 ///
 /// You can specify the behavior when a prime is found. Primes already present in the list will not be mapped.
@@ -104,10 +104,10 @@ pub fn prime_generator_map<
 }
 
 /// Parallelely check if every number from the start to the end specified is prime and returns the primes found in a Vec.
-/// 
+///
 /// The latest prime in the list list is used as a starting point if it is higher than the start supplied.
 ///
-/// Before checking in parallel, only one at a time will be checked until the square root of max.
+/// Before checking in parallel, only one number at a time will be checked until the square root of max.
 ///
 /// The Vec sent must be ordered. If you send an empty Vec, 2 and 3 will be added automatically.
 ///
@@ -139,12 +139,12 @@ where
 }
 
 /// Parallelely check if every number from the start to the end specified is prime and returns the primes found in a Vec.
-/// 
+///
 /// The latest prime in the list list is used as a starting point if it is higher than the start supplied.
 ///
 /// You can specify the behavior when a prime is found, but because they are checked in parallel they won't be mapped in order. Primes already present in the list will not be mapped.
 ///
-/// Before checking in parallel, only one at a time will be checked until the square root of max.
+/// Before checking in parallel, only one number at a time will be checked until the square root of max.
 ///
 /// The Vec sent must be ordered. If you send an empty Vec, 2 and 3 will be added automatically.
 ///
@@ -189,23 +189,16 @@ where
     par_prime_generator_map_nosetup(until, known_primes, start_from, found)
 }
 
-fn par_prime_generator_nosetup<
-    N: Roots + FromPrimitive + ToPrimitive + Copy + CheckedAdd + Send + Sync,
->(
-    until: N,
-    known_primes: Vec<N>,
-    start_from: N,
-) -> Vec<N>
-where
-    rayon::range::Iter<N>: IndexedParallelIterator<Item = N>,
-{
-    par_prime_generator_map_nosetup(until, known_primes, start_from, |_| {})
+fn oddize<N: Integer>(n: N) -> N {
+    // Would use `n | 1` is the number wasn't generic
+    if n.is_even() {
+        n + N::one()
+    } else {
+        n
+    }
 }
 
-fn par_prime_generator_map_nosetup<
-    N: Roots + FromPrimitive + ToPrimitive + Copy + CheckedAdd + Send + Sync,
-    F: Fn(N) + Send + Sync,
->(
+fn par_prime_generator_map_nosetup<N: Roots + Copy + Send + Sync, F: Fn(N) + Send + Sync>(
     until: N,
     mut known_primes: Vec<N>,
     start_from: N,
@@ -214,11 +207,7 @@ fn par_prime_generator_map_nosetup<
 where
     rayon::range::Iter<N>: IndexedParallelIterator<Item = N>,
 {
-    let start_from = if start_from.is_even() {
-        start_from + N::one()
-    } else {
-        start_from
-    };
+    let start_from = oddize(start_from);
     let mut new_primes: Vec<N> = (start_from..until)
         .into_par_iter()
         .step_by(2)
@@ -229,15 +218,38 @@ where
     known_primes
 }
 
+// It would probably be better to have a function that asks for a custom `filter` closure,
+// but it wouldn't be friendly to the borrow checker (due to `mut known_primes`, which `filter` likely uses).
+fn par_prime_generator_map_nosetup_bound<N: Integer + Copy + Send + Sync, F: Fn(N) + Send + Sync>(
+    until: N,
+    mut known_primes: Vec<N>,
+    start_from: N,
+    last_i: usize,
+    found: F,
+) -> Vec<N>
+where
+    rayon::range::Iter<N>: IndexedParallelIterator<Item = N>,
+{
+    let start_from = oddize(start_from);
+    let mut new_primes: Vec<N> = (start_from..until)
+        .into_par_iter()
+        .step_by(2)
+        .filter(|n| is_prime_nobound(*n, &known_primes[..last_i]))
+        .inspect(|n| found(*n))
+        .collect();
+    known_primes.append(new_primes.as_mut());
+    known_primes
+}
+
 /// Parallelely check if every number from the start to the end specified is prime and returns the primes found in a Vec.
-/// 
+///
 /// The latest prime in the list list is used as a starting point if it is higher than the start supplied.
 ///
-/// You can specify the behavior when a prime is found. The parallel iteration is divided in chunks, thus they will be mapped in order once the chunk is complete. Primes already present in the list will not be mapped.
+/// Before every cycle, `pre_cycle` is called with the start and end of the chunk passed as input. If it returns `false`, the function will return early.
 ///
-/// You can also specify a function to call for every cycle. The arguments are the start and the end of the chunk. If it returns `false`, the function will return early.
-/// 
-/// Before checking in parallel, only one at a time will be checked until the square root of the max of the first chunk.
+/// After every cycle, `post_cycle` is called with a a slice of the new primes numbers found.
+///
+/// Before checking in parallel, only one number at a time will be checked until the square root of the max of the first chunk.
 ///
 /// The Vec sent must be ordered. If you send an empty Vec, 2 and 3 will be added automatically.
 ///
@@ -262,15 +274,15 @@ where
 /// ```
 pub fn par_prime_generator_map_chunks<
     N: Roots + Roots + FromPrimitive + ToPrimitive + Copy + CheckedAdd + Send + Sync,
-    F: FnMut(N) + Sync,
-    G: FnMut(N, N) -> bool,
+    F: FnMut(N, N) -> bool,
+    G: FnMut(&[N]),
 >(
     until: N,
     mut known_primes: Vec<N>,
     start_from: N,
     chunk_size: N,
-    mut found: F,
-    mut cycle: G,
+    mut pre_cycle: F,
+    mut post_cycle: G,
 ) -> Vec<N>
 where
     rayon::range::Iter<N>: IndexedParallelIterator<Item = N>,
@@ -278,23 +290,27 @@ where
     assert!(!chunk_size.is_zero());
 
     let end = cmp::min(start_from + chunk_size, until);
-    if !cycle(start_from, end) {
+    if !pre_cycle(start_from, end) {
         return known_primes;
     }
 
+    let from = known_primes.len();
     known_primes = par_prime_generator(end, known_primes, start_from);
-    known_primes.iter().for_each(|n| found(*n));
+    post_cycle(&known_primes[from..]);
 
     for start in range_step(end, until, chunk_size) {
         let end = cmp::min(start + chunk_size, until);
-        if !cycle(start, end) {
+        if !pre_cycle(start, end) {
             break;
         }
-        let len = known_primes.len();
 
-        known_primes = par_prime_generator_nosetup(end, known_primes, start);
-
-        known_primes[len..].iter().for_each(|n| found(*n));
+        let from = known_primes.len();
+        // This is to reduce the number of square roots done.
+        let last_i = last_index(&end, known_primes.as_slice());
+        known_primes =
+            // Could be optimized further by skipping reducing the square roots even on the preparation phase, but... who cares?
+            par_prime_generator_map_nosetup_bound(end, known_primes, start, last_i, |_| {});
+        post_cycle(&known_primes[from..]);
     }
     known_primes
 }
@@ -340,15 +356,15 @@ mod tests {
     #[test]
     fn par_chunks_generator_test() {
         assert_eq!(
-            par_prime_generator_map_chunks(0, Vec::new(), 0, 5, |_| {}, |_, _| true),
+            par_prime_generator_map_chunks(0, Vec::new(), 0, 5, |_, _| true, |_| {}),
             Vec::new()
         );
         assert_eq!(
-            par_prime_generator_map_chunks(20, Vec::new(), 0, 5, |_| {}, |_, _| true),
+            par_prime_generator_map_chunks(20, Vec::new(), 0, 5, |_, _| true, |_| {}),
             vec![2, 3, 5, 7, 11, 13, 17, 19]
         );
         assert_eq!(
-            par_prime_generator_map_chunks(20, vec![2, 3, 5, 7], 0, 5, |_| {}, |_, _| true),
+            par_prime_generator_map_chunks(20, vec![2, 3, 5, 7], 0, 5, |_, _| true, |_| {}),
             vec![2, 3, 5, 7, 11, 13, 17, 19]
         );
         assert_eq!(
@@ -357,8 +373,8 @@ mod tests {
                 vec![2, 3, 5, 7, 11, 13, 17, 19, 23, 29],
                 0,
                 5,
+                |_, _| true,
                 |_| {},
-                |_, _| true
             ),
             vec![2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
         );
@@ -367,6 +383,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn multi_chunks_panic() {
-        par_prime_generator_map_chunks(20, Vec::new(), 0, 0, |_| {}, |_, _| true);
+        par_prime_generator_map_chunks(20, Vec::new(), 0, 0, |_, _| true, |_| {});
     }
 }

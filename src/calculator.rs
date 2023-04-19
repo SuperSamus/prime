@@ -2,7 +2,7 @@ use num::{integer::Roots, Integer};
 use rayon::prelude::*;
 
 #[inline]
-fn last_index<N: Roots>(n: &N, known_primes: &[N]) -> usize {
+pub(crate) fn last_index<N: Roots>(n: &N, known_primes: &[N]) -> usize {
     match known_primes.binary_search(&n.sqrt()) {
         Ok(i) => i + 1,
         Err(i) => i,
@@ -28,7 +28,7 @@ pub fn is_prime<N: Roots>(n: N, known_primes: &[N]) -> bool {
 ///
 /// Use it, for instance, if you want to force one specific sqrt for a chunk of numbers.
 #[inline]
-fn is_prime_nobound<N: Integer>(n: N, list: &[N]) -> bool {
+pub fn is_prime_nobound<N: Integer>(n: N, list: &[N]) -> bool {
     !list.iter().any(|i| (n.is_multiple_of(i)))
 }
 

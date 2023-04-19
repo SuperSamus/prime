@@ -25,10 +25,10 @@ fn main() {
             Vec::new(),
             chunk_size,
             0,
-            |n| {
-                tx.send(n).unwrap();
-            },
             |_, _| true,
+            |arr| {
+                arr.iter().for_each(|&n| tx.send(n).unwrap());
+            },
         );
     });
 
