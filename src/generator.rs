@@ -1,6 +1,8 @@
 use crate::calculator::*;
+use assert_unchecked::assert_unchecked;
 use num::integer::Roots;
-use num::{range_step, CheckedAdd, FromPrimitive, Integer, ToPrimitive};
+use num::range_step; // TODO: replace with Range trait
+use num::{CheckedAdd, FromPrimitive, Integer, ToPrimitive};
 use rayon::prelude::*;
 use std::cmp;
 
@@ -94,12 +96,18 @@ pub fn prime_generator_map<
     let start_from = start_from.max(known_primes.last().cloned().unwrap_or(N::zero()) + two);
 
     // +2 to not calculate the same number again. known_primes.last() is guaranteed to be odd.
-    for n in range_step(start_from, until, two) {
+    range_step(start_from, until, two).for_each(|n| {
+        unsafe {
+            assert_unchecked!(
+                n >= N::one() + N::one()
+                    && last_index(&n, &known_primes) <= last_index(&until, &known_primes)
+            )
+        };
         if is_prime(n, known_primes.as_slice()) {
             known_primes.push(n);
             found(n);
         }
-    }
+    });
     known_primes
 }
 
@@ -211,30 +219,16 @@ where
     let mut new_primes: Vec<N> = (start_from..until)
         .into_par_iter()
         .step_by(2)
-        .filter(|n| is_prime(*n, known_primes.as_slice()))
-        .inspect(|n| found(*n))
-        .collect();
-    known_primes.append(new_primes.as_mut());
-    known_primes
-}
-
-// It would probably be better to have a function that asks for a custom `filter` closure,
-// but it wouldn't be friendly to the borrow checker (due to `mut known_primes`, which `filter` likely uses).
-fn par_prime_generator_map_nosetup_bound<N: Integer + Copy + Send + Sync, F: Fn(N) + Send + Sync>(
-    until: N,
-    mut known_primes: Vec<N>,
-    start_from: N,
-    last_i: usize,
-    found: F,
-) -> Vec<N>
-where
-    rayon::range::Iter<N>: IndexedParallelIterator<Item = N>,
-{
-    let start_from = oddize(start_from);
-    let mut new_primes: Vec<N> = (start_from..until)
-        .into_par_iter()
-        .step_by(2)
-        .filter(|n| is_prime_nobound(*n, &known_primes[..last_i]))
+        .filter(|n| {
+            unsafe {
+                assert_unchecked!(
+                    *n >= N::one() + N::one()
+                        && last_index(n, known_primes.as_slice())
+                            <= last_index(&until, &known_primes)
+                )
+            };
+            is_prime(*n, known_primes.as_slice())
+        })
         .inspect(|n| found(*n))
         .collect();
     known_primes.append(new_primes.as_mut());
@@ -298,18 +292,17 @@ where
     known_primes = par_prime_generator(end, known_primes, start_from);
     post_cycle(&known_primes[from..]);
 
-    for start in range_step(end, until, chunk_size) {
+    let start_from =
+        end.max(known_primes.last().cloned().unwrap_or(N::zero()) + N::one() + N::one());
+
+    for start in range_step(start_from, until, chunk_size) {
         let end = cmp::min(start + chunk_size, until);
         if !pre_cycle(start, end) {
             break;
         }
 
         let from = known_primes.len();
-        // This is to reduce the number of square roots done.
-        let last_i = last_index(&end, known_primes.as_slice());
-        known_primes =
-            // Could be optimized further by skipping reducing the square roots even on the preparation phase, but... who cares?
-            par_prime_generator_map_nosetup_bound(end, known_primes, start, last_i, |_| {});
+        known_primes = par_prime_generator_map_nosetup(end, known_primes, start, |_| {});
         post_cycle(&known_primes[from..]);
     }
     known_primes
@@ -356,15 +349,19 @@ mod tests {
     #[test]
     fn par_chunks_generator_test() {
         assert_eq!(
-            par_prime_generator_map_chunks(0, Vec::new(), 0, 5, |_, _| true, |_| {}),
+            par_prime_generator_map_chunks(0, Vec::new(), 0, 10, |_, _| true, |_| {}),
             Vec::new()
         );
         assert_eq!(
-            par_prime_generator_map_chunks(20, Vec::new(), 0, 5, |_, _| true, |_| {}),
+            par_prime_generator_map_chunks(0, vec![2, 3, 5], 0, 10, |_, _| true, |_| {}),
+            vec![2, 3, 5]
+        );
+        assert_eq!(
+            par_prime_generator_map_chunks(20, Vec::new(), 0, 10, |_, _| true, |_| {}),
             vec![2, 3, 5, 7, 11, 13, 17, 19]
         );
         assert_eq!(
-            par_prime_generator_map_chunks(20, vec![2, 3, 5, 7], 0, 5, |_, _| true, |_| {}),
+            par_prime_generator_map_chunks(20, vec![2, 3, 5, 7], 0, 10, |_, _| true, |_| {}),
             vec![2, 3, 5, 7, 11, 13, 17, 19]
         );
         assert_eq!(
@@ -372,7 +369,7 @@ mod tests {
                 20,
                 vec![2, 3, 5, 7, 11, 13, 17, 19, 23, 29],
                 0,
-                5,
+                10,
                 |_, _| true,
                 |_| {},
             ),
@@ -382,7 +379,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn multi_chunks_panic() {
+    fn par_chunks_panic() {
         par_prime_generator_map_chunks(20, Vec::new(), 0, 0, |_, _| true, |_| {});
     }
 }

@@ -1,4 +1,4 @@
-use num::{integer::Roots, Integer};
+use num::integer::Roots;
 use rayon::prelude::*;
 
 #[inline]
@@ -19,17 +19,7 @@ pub fn is_prime<N: Roots>(n: N, known_primes: &[N]) -> bool {
     };
 
     let last_i = last_index(&n, known_primes);
-    is_prime_nobound(n, &known_primes[..last_i])
-}
-
-/// Calculates if the number n is prime by iterating through the known primes passed in.
-///
-/// All numbers in the list will be checked for the module operation.
-///
-/// Use it, for instance, if you want to force one specific sqrt for a chunk of numbers.
-#[inline]
-pub fn is_prime_nobound<N: Integer>(n: N, list: &[N]) -> bool {
-    !list.iter().any(|i| (n.is_multiple_of(i)))
+    !known_primes[..last_i].iter().any(|i| (n.is_multiple_of(i)))
 }
 
 /// Calculates if the number n is prime by iterating in parallel through only the known primes passed in.
@@ -45,22 +35,10 @@ where
     };
 
     let last_i = last_index(&n, known_primes);
-    par_is_prime_nobound(n, &known_primes[..last_i])
+    !known_primes[..last_i]
+        .par_iter()
+        .any(|i| (n.is_multiple_of(i)))
 }
-
-/// Calculates in parallel if the number n is prime by iterating through the known primes passed in.
-///
-/// All numbers in the list will be checked for the module operation.
-///
-/// Use it, for instance, if you want to force one specific sqrt for a chunk of numbers.
-#[inline]
-pub fn par_is_prime_nobound<N>(n: N, list: &[N]) -> bool
-where
-    N: Roots + Sync, /* to implement IntoParIter */
-{
-    !list.par_iter().any(|i| (n.is_multiple_of(i)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

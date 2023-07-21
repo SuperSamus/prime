@@ -1,6 +1,6 @@
 [package]
 name = "prime"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Martino Fontana <tinozzo123@gmail.com>"]
 edition = "2021"
 
@@ -10,9 +10,10 @@ edition = "2021"
 lto = true
 
 [dependencies]
+assert-unchecked = "0.1"
 num = "0.4"
 rayon = "1.7"
 
 [dev-dependencies]
 crossbeam-channel = "0.5"
-ctrlc = "3.2"
+ctrlc = "3.4"
